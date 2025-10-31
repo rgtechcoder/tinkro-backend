@@ -1,0 +1,41 @@
+# ✅ Tinkro Buddy – AI Chatbot Features (Documentation)
+
+## ✅ Language Intelligence
+- Hinglish + English auto detection
+- Reply in user’s language
+- Adaptive greeting (first English, then Hinglish if needed)
+
+## ✅ AI Powered (Groq)
+- Smart contextual replies
+- Uses product.json for accurate info
+- Short, friendly, helpful tone
+- Gives suggestions automatically
+- Uses memory from last 3 user messages
+- Partial name + description search
+- Cheapest kit finder
+
+## ✅ Rule-Based Fallback (Zero Cost Mode)
+- If Groq fails → instant fallback response
+- No downtime
+
+## ✅ Product Information Intelligence
+- Deep search in:
+  - name
+  - short_desc
+  - category
+- Suggests related items
+
+## ✅ System Architecture
+- Node.js + Express backend
+- Groq LLM API integration
+- File Upload support
+- Static product.json database
+- Conversational memory per user
+- Clean & optimized logic
+- Fast response time
+
+## ✅ Extra Safety
+- Error-safe fallback
+- Always returns a usable message
+- No API crash
+

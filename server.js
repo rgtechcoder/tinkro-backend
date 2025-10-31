@@ -1,27 +1,25 @@
 
-// // server.js
+
+// // server.js (Groq + Rule-based hybrid)
 // import express from "express";
 // import fs from "fs/promises";
 // import path from "path";
 // import cors from "cors";
 // import multer from "multer";
+// import fetch from "node-fetch";
 
 // const app = express();
 
-// // ===== MIDDLEWARES =====
 // app.use(cors());
 // app.use(express.json());
 
-// // Public folder (for logo etc.)
+// // ---------- Static public folder ----------
 // app.use(express.static(path.join(process.cwd(), "public")));
 
-
-// // ===== CREATE UPLOADS DIRECTORY =====
+// // ---------- Uploads ----------
 // const uploadsDir = path.join(process.cwd(), "data", "uploads");
 // await fs.mkdir(uploadsDir, { recursive: true });
 
-
-// // ===== MULTER (UPLOAD SETTINGS) =====
 // const storage = multer.diskStorage({
 //   destination: (req, file, cb) => cb(null, uploadsDir),
 //   filename: (req, file, cb) => {
@@ -29,153 +27,189 @@
 //     cb(null, safe);
 //   }
 // });
+// const upload = multer({ storage });
 
-// const upload = multer({
-//   storage,
-//   limits: { fileSize: 10 * 1024 * 1024 } // 10MB
-// });
-
-
-// // ===== PRODUCTS JSON PATH =====
+// // ---------- Products file ----------
 // const productsFile = path.join(process.cwd(), "data", "products.json");
 
 // async function loadProducts() {
 //   try {
-//     const text = await fs.readFile(productsFile, "utf8");
-//     return JSON.parse(text);
-//   } catch (err) {
-//     console.error("products.json missing or invalid");
+//     const txt = await fs.readFile(productsFile, "utf8");
+//     return JSON.parse(txt);
+//   } catch {
 //     return [];
 //   }
 // }
 
+// // ---------- Detect language ----------
+// function detectLang(msg) {
+//   const t = msg.toLowerCase();
+//   const hindi = ["kya", "kaise", "nahi", "krna", "mujhe", "sasti"];
+//   const english = ["what", "price", "show", "cheapest", "kit"];
 
+//   const h = hindi.filter(w => t.includes(w)).length;
+//   const e = english.filter(w => t.includes(w)).length;
 
-// // ✅ ✅ ✅ ===== CHATBOT ENDPOINT =====
+//   return h > e ? "hinglish" : "english";
+// }
+
+// // ---------- GROQ AI CALL ----------
+// async function askGroq(systemPrompt, userPrompt, apiKey, model) {
+//   const resp = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+//     method: "POST",
+//     headers: {
+//       "Authorization": `Bearer ${apiKey}`,
+//       "Content-Type": "application/json"
+//     },
+//     body: JSON.stringify({
+//       model,
+//       messages: [
+//         { role: "system", content: systemPrompt },
+//         { role: "user", content: userPrompt }
+//       ],
+//       temperature: 0.6
+//     })
+//   });
+
+//   const json = await resp.json();
+//   return json?.choices?.[0]?.message?.content || "";
+// }
+
+// // ---------- CHATBOT ----------
 // app.post("/api/chat", async (req, res) => {
 //   try {
 //     const { message } = req.body;
 //     if (!message) return res.json({ reply: "Please type something 😊" });
 
+//     const lang = detectLang(message);
 //     const txt = message.toLowerCase();
 //     const products = await loadProducts();
 
-//     // Simple word detection
-//     const hindiWords = ["kya", "kaise", "nahi", "kitna", "dikhao", "batao"];
-//     const englishWords = ["what", "price", "show", "find", "product", "help"];
+//     const matched = products.find(p =>
+//       txt.includes((p.name || "").toLowerCase())
+//     );
 
-//     const hCount = hindiWords.filter(w => txt.includes(w)).length;
-//     const eCount = englishWords.filter(w => txt.includes(w)).length;
-//     const lang = hCount >= eCount ? "hinglish" : "english";
+//     const kits = products.filter(p => p.category === "kit");
+//     let cheapest = null;
+//     if (kits.length) {
+//       kits.sort((a, b) => a.price - b.price);
+//       cheapest = kits[0];
+//     }
 
-//     // GREETING
+//     // ----------- AI MODE (Groq) -----------
+//     const USE_AI = process.env.USE_AI === "true";
+//     const AI_PROVIDER = process.env.AI_PROVIDER;
+//     const GROQ_KEY = process.env.GROQ_API_KEY;
+
+//     if (USE_AI && AI_PROVIDER === "groq" && GROQ_KEY) {
+//       try {
+//         const systemPrompt = `
+// You are Tinkro Buddy — respond in the same language: ${lang}.
+// If Hinglish → use Hinglish.
+// If English → use English.
+// Use product data below if relevant:
+
+// Matched: ${matched ? JSON.stringify(matched) : "none"}
+// Cheapest kit: ${cheapest ? JSON.stringify(cheapest) : "none"}
+
+// Keep replies short, friendly, and helpful.
+// `;
+
+//         const aiReply = await askGroq(
+//           systemPrompt,
+//           message,
+//           GROQ_KEY,
+//           process.env.GROQ_MODEL || "llama3-70b-versatile"
+//         );
+
+//         if (aiReply?.length) {
+//           return res.json({ reply: aiReply });
+//         }
+//       } catch (err) {
+//         console.error("Groq failed, using fallback:", err);
+//       }
+//     }
+
+//     // ----------- FALLBACK RULE-BASED -----------
+
 //     if (txt.includes("hi") || txt.includes("hello")) {
 //       return res.json({
 //         reply:
 //           lang === "hinglish"
 //             ? "👋 Hi! Main Tinkro Buddy hoon — kaise help karu?"
-//             : "👋 Hi! I’m Tinkro Buddy — how can I help you today?"
+//             : "👋 Hi! I'm Tinkro Buddy — how can I help you?"
 //       });
 //     }
 
-//     // Cheapest kit
-//     if (txt.includes("sasti") || txt.includes("cheap") || txt.includes("cheapest") || txt.includes("kit")) {
-//       const kits = products.filter(p => p.category === "kit");
-//       if (!kits.length)
-//         return res.json({ reply: "No kits found in products.json." });
+//     if (cheapest && (txt.includes("sasti") || txt.includes("cheapest") || txt.includes("kit"))) {
+//       const r =
+//         lang === "hinglish"
+//           ? `Sabse sasti kit: ${cheapest.name} — ₹${cheapest.price}`
+//           : `Cheapest kit: ${cheapest.name} — ₹${cheapest.price}`;
+//       return res.json({ reply: r });
+//     }
 
-//       kits.sort((a, b) => (a.price || 0) - (b.price || 0));
-//       const cheapest = kits[0];
-
+//     if (matched) {
 //       return res.json({
-//         reply:
-//           lang === "hinglish"
-//             ? `Sabse sasti kit: *${cheapest.name}* — ₹${cheapest.price}`
-//             : `Cheapest kit: *${cheapest.name}* — ₹${cheapest.price}`
+//         reply: `${matched.name}\nPrice: ₹${matched.price}\nLink: ${matched.url}`
 //       });
 //     }
 
-//     // Product name match
-//     const found = products.find(p =>
-//       txt.includes((p.name || "").toLowerCase())
-//     );
-
-//     if (found) {
-//       return res.json({
-//         reply: `*${found.name}*\nPrice: ₹${found.price}\nStock: ${found.stock || "Available"}`
-//       });
-//     }
-
-//     // DEFAULT
 //     return res.json({
 //       reply:
 //         lang === "hinglish"
-//           ? "Sorry bhai, samajh nahi aaya. Product name ya 'cheapest kit' try karo."
-//           : "Sorry, I didn’t understand. Try a product name or 'cheapest kit'."
+//           ? "Sorry bhai, samajh nahi aaya. Product name try karo."
+//           : "Sorry, I didn’t understand. Try a product name."
 //     });
 
 //   } catch (err) {
-//     console.error("Chatbot error:", err);
-//     res.status(500).json({ reply: "Server error. Try again later." });
+//     console.error("Chat error:", err);
+//     res.json({ reply: "Server error, try again later." });
 //   }
 // });
 
-
-
-// // ✅ ✅ ✅ ===== FILE UPLOAD ENDPOINT =====
+// // ---------- UPLOAD ----------
 // app.post("/api/upload", upload.single("file"), (req, res) => {
-//   try {
-//     if (!req.file)
-//       return res.status(400).json({ error: "No file uploaded" });
-
-//     const base = process.env.BASE_URL || `${req.protocol}://${req.get("host")}`;
-//     const fileUrl = `${base}/uploads/${req.file.filename}`;
-
-//     res.json({ url: fileUrl, filename: req.file.filename });
-
-//   } catch (err) {
-//     console.error("Upload error:", err);
-//     res.status(500).json({ error: "Upload failed" });
-//   }
+//   if (!req.file) return res.status(400).json({ error: "No file uploaded" });
+//   const base = process.env.BASE_URL || `${req.protocol}://${req.get("host")}`;
+//   return res.json({ url: `${base}/uploads/${req.file.filename}` });
 // });
 
 // app.use("/uploads", express.static(uploadsDir));
 
+// app.get("/", (req, res) => res.send("✅ Tinkro Backend Running with Groq AI"));
 
-
-// // ===== HEALTH CHECK =====
-// app.get("/", (req, res) => {
-//   res.send("✅ Tinkro Backend is running");
-// });
-
-
-// // ===== PORT FOR RENDER =====
 // const port = process.env.PORT || 10000;
-// app.listen(port, () => console.log("✅ API running on port", port));
+// app.listen(port, () => console.log("✅ Server running on port", port));
 
+// ✅ server.js — Tinkro Backend (Groq AI + Chatbot + Upload + Support)
 // server.js
 import express from "express";
-import fs from "fs/promises";
+import fs from "fs";
+import fsp from "fs/promises";
 import path from "path";
 import cors from "cors";
 import multer from "multer";
+import fetch from "node-fetch"; // optional if you use Groq; Node 18+ has global fetch too
 
 const app = express();
-
-// ===== MIDDLEWARES =====
 app.use(cors());
 app.use(express.json());
 
-// Public folder (for logo, static files)
+// ---------- Public static (logo, images) ----------
 app.use(express.static(path.join(process.cwd(), "public")));
 
+// ---------- Ensure data & uploads directory exists (sync safe) ----------
+const dataDir = path.join(process.cwd(), "data");
+const uploadsDir = path.join(dataDir, "uploads");
+try {
+  if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
+  if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
+} catch (err) {
+  console.error("Error creating data directories:", err);
+}
 
-// ===== UPLOAD DIRECTORY =====
-const uploadsDir = path.join(process.cwd(), "data", "uploads");
-await fs.mkdir(uploadsDir, { recursive: true });
-
-
-// ===== MULTER (UPLOAD SETTINGS) =====
+// ---------- Multer setup for file upload ----------
 const storage = multer.diskStorage({
   destination: (req, file, cb) => cb(null, uploadsDir),
   filename: (req, file, cb) => {
@@ -183,125 +217,182 @@ const storage = multer.diskStorage({
     cb(null, safe);
   }
 });
+const upload = multer({ storage, limits: { fileSize: 10 * 1024 * 1024 } }); // 10 MB
 
-const upload = multer({
-  storage,
-  limits: { fileSize: 10 * 1024 * 1024 }
-});
-
-
-// ===== PRODUCTS FILE =====
-const productsFile = path.join(process.cwd(), "data", "products.json");
-
+// ---------- Products file loader ----------
+const productsFile = path.join(dataDir, "products.json");
 async function loadProducts() {
   try {
-    const text = await fs.readFile(productsFile, "utf8");
-    return JSON.parse(text);
+    const txt = await fsp.readFile(productsFile, "utf8");
+    return JSON.parse(txt);
   } catch (err) {
-    console.error("products.json missing or invalid");
+    // if missing or broken, return empty array
+    console.warn("products.json not found or invalid. returning empty list.");
     return [];
   }
 }
 
+// ---------- Simple Hinglish <-> English detector ----------
+function detectLang(msg) {
+  const t = (msg || "").toLowerCase();
+  const hindi = ["kya", "kaise", "nahi", "batao", "sasti", "krna", "mujhe", "kaun", "kitna"];
+  const english = ["what", "price", "show", "help", "kit", "product", "cheapest", "how", "hello", "hi"];
+  const h = hindi.filter(w => t.includes(w)).length;
+  const e = english.filter(w => t.includes(w)).length;
+  return h > e ? "hinglish" : "english";
+}
 
+// ---------- GROQ AI helper (optional) ----------
+async function askGroq(systemPrompt, userPrompt) {
+  const key = process.env.GROQ_API_KEY;
+  const model = process.env.GROQ_MODEL || "llama3-70b-versatile";
+  if (!key) return null;
 
-// ✅ ✅ ✅ CHATBOT ENDPOINT
+  try {
+    const resp = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${key}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        model,
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: userPrompt }
+        ],
+        temperature: 0.6
+      })
+    });
+    const json = await resp.json();
+    return json?.choices?.[0]?.message?.content || null;
+  } catch (err) {
+    console.error("Groq API error:", err);
+    return null;
+  }
+}
+
+// ---------- MAIN CHAT ENDPOINT ----------
 app.post("/api/chat", async (req, res) => {
   try {
     const { message } = req.body;
-    if (!message) return res.json({ reply: "Please type something 😊" });
+    if (!message || !message.toString().trim()) {
+      return res.json({ reply: "Please type something so I can help 😊" });
+    }
 
-    const txt = message.toLowerCase();
+    const txt = message.toString().trim();
+    const lang = detectLang(txt);
     const products = await loadProducts();
 
-    // Detect language
-    const hindiWords = ["kya", "kaise", "nahi", "kitna", "dikhao", "batao"];
-    const englishWords = ["what", "price", "show", "find", "product", "help"];
+    // try product matching
+    const matched = products.find(p => txt.toLowerCase().includes((p.name || "").toLowerCase()));
+    const kits = products.filter(p => p.category === "kit");
+    const cheapest = kits.length ? kits.slice().sort((a,b)=> (a.price||0)-(b.price||0))[0] : null;
 
-    const hCount = hindiWords.filter(w => txt.includes(w)).length;
-    const eCount = englishWords.filter(w => txt.includes(w)).length;
-    const lang = eCount > hCount ? "english" : "hinglish";
+    // If AI is enabled, ask Groq first (best-effort)
+    if (process.env.USE_AI === "true" && process.env.GROQ_API_KEY) {
+      try {
+        const systemPrompt = `
+You are Tinkro Buddy chatbot. Reply in the same language as user (Hinglish or English).
+If Hinglish -> reply in casual Hinglish (roman Hindi).
+If English -> reply in English.
+Use the product info when appropriate.
+Matched: ${matched ? JSON.stringify(matched) : "none"}
+Cheapest kit: ${cheapest ? JSON.stringify(cheapest) : "none"}
+Keep responses short, helpful and friendly.
+`;
+        const ai = await askGroq(systemPrompt, txt);
+        if (ai && ai.toString().trim()) {
+          return res.json({ reply: ai });
+        }
+      } catch (err) {
+        console.warn("Groq failed, continuing fallback:", err);
+      }
+    }
 
-    // ✅ GREETING (English always first)
-    if (txt.includes("hi") || txt.includes("hello") || txt.includes("hey")) {
+    // ---------- RULE-BASED FALLBACKS ----------
+
+    // greeting (prefer english if message seems english)
+    if (/\b(hi|hello|hey)\b/i.test(txt)) {
       return res.json({
-        reply: "👋 Hi! I’m Tinkro Buddy — how can I help you today?"
+        reply: lang === "hinglish"
+          ? "👋 Hi! Main Tinkro Buddy hoon — kaise help karu aaj?"
+          : "👋 Hi! I’m Tinkro Buddy — how can I help you today?"
       });
     }
 
-    // ✅ Cheapest Kit
-    if (
-      txt.includes("sasti") || txt.includes("cheap") ||
-      txt.includes("cheapest") || txt.includes("kit")
-    ) {
-      const kits = products.filter(p => p.category === "kit");
-      if (!kits.length)
-        return res.json({ reply: "No kits found in products.json." });
-
-      kits.sort((a, b) => (a.price || 0) - (b.price || 0));
-      const cheapest = kits[0];
-
+    // support intent
+    if (/(support|help|customer care|agent|human|talk to support)/i.test(txt)) {
       return res.json({
-        reply:
-          lang === "hinglish"
-            ? `Sabse sasti kit: *${cheapest.name}* — ₹${cheapest.price}`
-            : `Cheapest kit: *${cheapest.name}* — ₹${cheapest.price}`
+        reply: lang === "hinglish"
+          ? "✅ Aap humare support team ko yahan contact kar sakte ho — https://tinkro.in/contact"
+          : "✅ You can reach our support team here — https://tinkro.in/contact"
       });
     }
 
-    // ✅ Product Match
-    const found = products.find(p =>
-      txt.includes((p.name || "").toLowerCase())
-    );
-
-    if (found) {
+    // price / cheapest / kit intent
+    if (cheapest && /(cheapest|sasti|cheap|kit)/i.test(txt)) {
       return res.json({
-        reply: `*${found.name}*\nPrice: ₹${found.price}\nStock: ${found.stock || "Available"}`
+        reply: lang === "hinglish"
+          ? `Sabse sasti kit: ${cheapest.name} — ₹${cheapest.price}. Link: ${cheapest.url || "N/A"}`
+          : `Cheapest kit: ${cheapest.name} — ₹${cheapest.price}. Link: ${cheapest.url || "N/A"}`
       });
     }
 
-    // ✅ DEFAULT
+    // product exact name matched
+    if (matched) {
+      return res.json({
+        reply: `${matched.name}\nPrice: ₹${matched.price}\nStock: ${matched.stock ?? "N/A"}\nLink: ${matched.url || "N/A"}`
+      });
+    }
+
+    // default fallback
     return res.json({
-      reply:
-        lang === "hinglish"
-          ? "Samajh nahi aaya. Product name ya 'cheapest kit' try karo."
-          : "I didn’t understand. Try a product name or 'cheapest kit'."
+      reply: lang === "hinglish"
+        ? "Sorry bhai, samajh nahi aaya. Product name ya 'cheapest kit' try karo."
+        : "Sorry, I didn’t quite understand. Try a product name or 'cheapest kit'."
     });
 
   } catch (err) {
     console.error("Chat error:", err);
-    res.status(500).json({ reply: "Server error. Try again later." });
+    return res.status(500).json({ reply: "Server error — try again later." });
   }
 });
 
+// ---------- SUPPORT endpoint (Talk to support) ----------
+app.post("/api/support", async (req, res) => {
+  try {
+    const { email, userMessage, time } = req.body || {};
+    console.log("📩 SUPPORT REQUEST RECEIVED");
+    console.log("Email:", email || "(no email provided)");
+    console.log("Message:", userMessage);
+    console.log("Time:", time || new Date().toISOString());
 
+    // FUTURE: send email from server -> use nodemailer or transactional provider
+    // For now we just acknowledge and log.
+    return res.json({ ok: true, message: "Support request received. We'll contact you soon." });
+  } catch (err) {
+    console.error("Support error:", err);
+    return res.status(500).json({ ok: false, error: "Failed to store support request" });
+  }
+});
 
-// ✅ FILE UPLOAD ENDPOINT
+// ---------- FILE UPLOAD ----------
 app.post("/api/upload", upload.single("file"), (req, res) => {
   try {
-    if (!req.file)
-      return res.status(400).json({ error: "No file uploaded" });
-
+    if (!req.file) return res.status(400).json({ error: "No file uploaded" });
     const base = process.env.BASE_URL || `${req.protocol}://${req.get("host")}`;
-    const fileUrl = `${base}/uploads/${req.file.filename}`;
-
-    res.json({ url: fileUrl, filename: req.file.filename });
-
+    return res.json({ url: `${base}/uploads/${req.file.filename}`, filename: req.file.filename });
   } catch (err) {
     console.error("Upload error:", err);
-    res.status(500).json({ error: "Upload failed" });
+    return res.status(500).json({ error: "Upload failed" });
   }
 });
-
 app.use("/uploads", express.static(uploadsDir));
 
+// ---------- Health check ----------
+app.get("/", (req, res) => res.send("✅ Tinkro Backend is running"));
 
-// ===== HEALTH CHECK =====
-app.get("/", (req, res) => {
-  res.send("✅ Tinkro Backend is running");
-});
-
-
-// ===== PORT =====
+// ---------- Start ----------
 const port = process.env.PORT || 10000;
-app.listen(port, () => console.log("✅ API running on port", port));
+app.listen(port, () => console.log("✅ Server running on port", port));
