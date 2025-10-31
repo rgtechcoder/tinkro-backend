@@ -1,0 +1,22 @@
+[
+  {
+    "id": 1,
+    "name": "Arduino Starter Kit",
+    "price": 799,
+    "currency": "INR",
+    "category": "kit",
+    "stock": 24,
+    "url": "https://tinkro.in/products/arduino-starter-kit",
+    "short_desc": "Basic Arduino starter kit with sensors and wires."
+  },
+  {
+    "id": 2,
+    "name": "Smart Sensor Kit",
+    "price": 1299,
+    "currency": "INR",
+    "category": "kit",
+    "stock": 12,
+    "url": "https://tinkro.in/products/sensor-kit",
+    "short_desc": "Sensor bundle for IoT experiments."
+  }
+]
